@@ -7,7 +7,7 @@ from functools import partial
 from tqdm import tqdm
 import optax
 
-import models
+from . import models
 
 class train_by_regression():
     """training by doing linear/ridge regression"""
@@ -73,8 +73,8 @@ class train_by_BP():
         self.batch_size = batch_size
         self.n_batches = None
         self.batches = None 
-        # the shape of batches is (n_batches, batch_size, time_delay_dim_V + time_delay_dim_I + 1)
-        # the last dimension of batches is ( V(t-xxx),...,V(t), I(t-xxx),...,I(t), V(t+1) )
+        # the shape of `batches` is (n_batches, batch_size, time_delay_dim_V + time_delay_dim_I + 1)
+        # the last dimension of `batches` is ( V(t-xxx),...,V(t), I(t-xxx),...,I(t), V(t+1) )
         self.loss_list = None
 
     def get_batches(self, key):

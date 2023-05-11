@@ -48,16 +48,16 @@ class prediction_model(nn.Module):
         self.C_correction_factor_inverse = self.param("correction factor of 1/C", jax.nn.initializers.ones(), (1, ))
 
     def __call__(self, time_delay_V, time_delay_avg_I):
-        """time_delay_V and time_delay_avg_I should be 1d or 2d arrays. If they are 2d, their first dimension should be n_batch. 
-        The last dim of time_delay_V is [V(t-n*tau, ..., V(t-tau), V(t))].
-        The last dim of time_delay_avg_I is [avg_i(t-n*tau), ..., avg_i(t-tau), avg_i(t)].
+        """`time_delay_V` and `time_delay_avg_I` should be 1d or 2d arrays. If they are 2d, their first dimension should be n_batch. 
+        The last dim of `time_delay_V` is [V(t-n*tau, ..., V(t-tau), V(t))].
+        The last dim of `time_delay_avg_I` is [avg_i(t-n*tau), ..., avg_i(t-tau), avg_i(t)].
         Current is the average current of the interval between present time and the time of prediction. (usually it is simply (I(t) + I(t+h)/2)"""
         time_delay_V = jnp.atleast_2d(time_delay_V)
         time_delay_avg_I = jnp.atleast_2d(time_delay_avg_I)
         return jax.vmap(self.single_evaluation, in_axes=(0, 0))(time_delay_V, time_delay_avg_I)
     
     def single_evaluation(self, time_delay_V, time_delay_avg_I):
-        """time_delay_V and time_delay_avg_I are expected to be 1d arrays"""
+        """`time_delay_V` and `time_delay_avg_I` are expected to be 1d arrays"""
         Vt = time_delay_V[-1] # the voltage at time t.
         It = time_delay_avg_I[-1] # the average current at time t
         rbfs = self._rbfs(time_delay_V)
@@ -71,7 +71,7 @@ class prediction_model(nn.Module):
         return Vt + self.time_spacing*(self.C_correction_factor_inverse*(rbf_term + leak_term + poly_term + It*self.weight_C_inverse) + ann_term) 
     
     def _rbfs(self, time_delay_V):
-        "time_delay_V is expected to be 1d array"
+        "`time_delay_V` is expected to be 1d array"
         diff = (self.centers - time_delay_V)**2
         diff = jnp.sum(diff, axis=-1)*self.R/2
         return jnp.exp(-diff)
