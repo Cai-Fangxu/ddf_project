@@ -6,8 +6,24 @@ from typing import Sequence
 from functools import partial
 from tqdm import tqdm
 import optax
+from sklearn.cluster import KMeans
+import sklearn.neighbors
 
 from . import models
+
+def get_centers_and_R(voltage_list: Sequence[float], time_delay_V: int, time_delay_dim_V: int, n_centers: int, n_neighbors: int):
+    """return a tuple: (centers, R)
+    the shape of centers is (n_centers, time_delay_dim_V)
+    the shape of R is (n_centers, )
+    """
+    points_time_delay = np.array([np.roll(voltage_list, -i*time_delay_V) for i in range(time_delay_dim_V)]).T
+    points_time_delay = points_time_delay[: -time_delay_V*(time_delay_dim_V-1)]
+    kmeans = KMeans(n_clusters=n_centers, random_state=0, n_init="auto").fit(points_time_delay)
+    nbrs = sklearn.neighbors.NearestNeighbors(n_neighbors=n_neighbors, algorithm="ball_tree").fit(kmeans.cluster_centers_)
+    distances, _ = nbrs.kneighbors(kmeans.cluster_centers_)
+    sigma = distances[:, -1]
+    R = 1/sigma**2
+    return (kmeans.cluster_centers_, R)
 
 class train_by_regression():
     """training by doing linear/ridge regression"""
@@ -33,25 +49,28 @@ class train_by_regression():
         tmp_i = (self.current_list + jnp.roll(self.current_list, -1))/2
         tmp_i = tmp_i[first_usable_t_idx:-1]
 
-        self.X = jax.vmap(self._get_basis, in_axes=(0, 0))(tmp_v, tmp_i)
-        self.Y = tmp_delta_v/self.time_spacing
+        self.X = jax.vmap(self._get_basis, in_axes=(0, 0))(tmp_v, tmp_delta_v/self.time_spacing)
+        self.Y = tmp_i
 
-    def _get_basis(self, time_delay_V, avg_I):
-        diff = self.centers - time_delay_V
+    def _get_basis(self, time_delay_Vs, dVdt):
+        diff = self.centers - time_delay_Vs
         rbfs = jnp.exp(-np.sum(diff**2, axis=-1)*self.R/2)
-        leaky_terms = jnp.array([1, time_delay_V[-1]])
-        return jnp.concatenate((rbfs, leaky_terms, jnp.array([avg_I])))
+        leaky_terms = jnp.array([1, time_delay_Vs[-1]])
+        return jnp.concatenate((-rbfs, -leaky_terms, jnp.array([dVdt])))
 
 
-    def get_weights(self):
-        ridge = sklearn.linear_model.Ridge(alpha=self.beta, fit_intercept=False)
+    def get_weights(self, solver="auto"):
+        ridge = sklearn.linear_model.Ridge(alpha=self.beta, fit_intercept=False, solver=solver)
         self.ridge = ridge.fit(self.X, self.Y)
         self.score = ridge.score(self.X, self.Y)
-        weight_C_inverse = ridge.coef_[-1]
+        weight_C = ridge.coef_[-1]
         weights_leak = ridge.coef_[-3:-1]
         weights_rbf = ridge.coef_[:-3]
-        return (weights_rbf, weights_leak, weight_C_inverse)
+        return (weights_rbf, weights_leak, weight_C)
     
+    def get_error_list(self):
+        return self.Y - self.X @ self.ridge.coef_
+
 class train_by_BP():
     def __init__(self, 
         stimulus_list: Sequence[float], # 1d array
@@ -101,7 +120,7 @@ class train_by_BP():
         time_delay_V = batch[:, :self.time_delay_dim_V]
         time_dealy_I = batch[:, self.time_delay_dim_V : self.time_delay_dim_V+self.time_delay_dim_I]
         preds_true = batch[:, -1]
-        preds = self.model.apply(params, time_delay_V, time_dealy_I)
+        preds = self.model.apply(params, time_delay_V, time_dealy_I).reshape(preds_true.shape)
         return jnp.sum((preds - preds_true)**2)/self.batch_size
 
     @partial(jax.jit, static_argnums=(0, ))

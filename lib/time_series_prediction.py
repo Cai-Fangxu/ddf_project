@@ -37,6 +37,6 @@ class time_series_prediction():
             vs = jnp.array(self.prediction_list[..., state_indices_V])
             avg_is = jnp.array(self.batch_avg_i[..., state_indices_I])
             next_v = self.model.apply(params, vs, avg_is)
-            self.prediction_list[..., i + self.t0 + 1] = next_v
+            self.prediction_list[..., i + self.t0 + 1] = next_v.reshape((-1, ))
             state_indices_V = state_indices_V + 1
             state_indices_I = state_indices_I + 1

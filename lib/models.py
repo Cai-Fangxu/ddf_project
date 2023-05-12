@@ -41,38 +41,37 @@ class prediction_model(nn.Module):
     weights_rbf: Sequence[float]
     ann: nn.Module = None
     weights_leak: Sequence[float] = jnp.zeros(2)
-    weight_C_inverse: float = 1.
+    weight_C: float = 1.
     weights_poly: Union[Sequence[float], None] = None
     
     def setup(self) -> None:
-        self.C_correction_factor_inverse = self.param("correction factor of 1/C", jax.nn.initializers.ones(), (1, ))
+        self.C_inverse_correction_factor = self.param("correction factor of 1/C", jax.nn.initializers.ones, (1, ))
 
-    def __call__(self, time_delay_V, time_delay_avg_I):
+    def __call__(self, time_delay_Vs, time_delay_avg_Is):
         """`time_delay_V` and `time_delay_avg_I` should be 1d or 2d arrays. If they are 2d, their first dimension should be n_batch. 
         The last dim of `time_delay_V` is [V(t-n*tau, ..., V(t-tau), V(t))].
         The last dim of `time_delay_avg_I` is [avg_i(t-n*tau), ..., avg_i(t-tau), avg_i(t)].
         Current is the average current of the interval between present time and the time of prediction. (usually it is simply (I(t) + I(t+h)/2)"""
-        time_delay_V = jnp.atleast_2d(time_delay_V)
-        time_delay_avg_I = jnp.atleast_2d(time_delay_avg_I)
-        return jax.vmap(self.single_evaluation, in_axes=(0, 0))(time_delay_V, time_delay_avg_I)
+        time_delay_Vs = jnp.atleast_2d(time_delay_Vs)
+        time_delay_avg_Is = jnp.atleast_2d(time_delay_avg_Is)
+        return jax.vmap(self.single_evaluation, in_axes=(0, 0))(time_delay_Vs, time_delay_avg_Is)
     
-    def single_evaluation(self, time_delay_V, time_delay_avg_I):
+    def single_evaluation(self, time_delay_Vs, time_delay_avg_Is):
         """`time_delay_V` and `time_delay_avg_I` are expected to be 1d arrays"""
-        Vt = time_delay_V[-1] # the voltage at time t.
-        It = time_delay_avg_I[-1] # the average current at time t
-        rbfs = self._rbfs(time_delay_V)
+        Vt = time_delay_Vs[-1] # the voltage at time t.
+        It = time_delay_avg_Is[-1] # the average current at time t
+        rbfs = self._rbfs(time_delay_Vs)
 
         rbf_term = self._rbf_fun(rbfs)
-        ann_term = self._ann_fun(rbfs, time_delay_avg_I)
+        ann_term = self._ann_fun(rbfs, time_delay_avg_Is)
         leak_term = self._leaky_fun(Vt)
-        poly_term = self._poly_fun(time_delay_V)
+        poly_term = self._poly_fun(time_delay_Vs)
 
-        # return Vt + self.time_spacing*(rbfs + leak + polys + It*self.weight_C_inverse+ ann_out) # use this line if C is not learned.
-        return Vt + self.time_spacing*(self.C_correction_factor_inverse*(rbf_term + leak_term + poly_term + It*self.weight_C_inverse) + ann_term) 
+        return Vt + self.time_spacing*self.C_inverse_correction_factor*(rbf_term + leak_term + poly_term + It/self.weight_C) + ann_term
     
-    def _rbfs(self, time_delay_V):
+    def _rbfs(self, time_delay_Vs):
         "`time_delay_V` is expected to be 1d array"
-        diff = (self.centers - time_delay_V)**2
+        diff = (self.centers - time_delay_Vs)**2
         diff = jnp.sum(diff, axis=-1)*self.R/2
         return jnp.exp(-diff)
     
@@ -86,8 +85,8 @@ class prediction_model(nn.Module):
     def _poly_fun(self, time_delay_V):
         return 0.
     
-    def _ann_fun(self, rbfs, time_delay_avg_I):
-        ann_out = self.ann(rbfs, time_delay_avg_I)
+    def _ann_fun(self, rbfs, time_delay_avg_Is):
+        ann_out = self.ann(rbfs, time_delay_avg_Is)
         ann_out = ann_out.reshape(ann_out.shape[:-1]) # change shape from (..., 1) to (...)
         return ann_out
 

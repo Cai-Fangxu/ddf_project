@@ -72,8 +72,8 @@ class colpitts_stimulus(stimulus_base_class):
 
 class sinusoidals_stimulus(stimulus_base_class):
     def __init__(self, time_range, amplitude, periods, coeffs, phases, dc_stimulus=0) -> None:
-        """amplitude: the overall amplitude of the stimulus
-        periods: a list of periods for sinusodial waves, the unit is ms"""
+        """`amplitude`: the overall amplitude of the stimulus
+        `periods`: a list of periods for sinusodial waves, the unit is ms"""
         super().__init__(time_range, initial_state=None, time_constant=1, rescale_factor=1, dc_stimulus=dc_stimulus)
         self.amplitude = amplitude
         self.periods = periods
