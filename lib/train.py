@@ -26,8 +26,8 @@ def get_centers_and_R(voltage_list: Sequence[float], time_delay_V: int, time_del
     return (kmeans.cluster_centers_, R)
 
 class train_by_regression():
-    """training by doing linear/ridge regression"""
-    def __init__(self, centers, voltage_list, current_list, time_delay, time_delay_dim, time_spacing, beta, R) -> None:
+    """training by doing ridge regression"""
+    def __init__(self, centers, voltage_list, current_list, time_delay, time_delay_dim, time_spacing, beta, R, fixed_C=False, weight_C=None) -> None:
         self.centers = centers # (n_centers, time_delay_dim)
         self.voltage_list = voltage_list
         self.current_list = current_list
@@ -38,9 +38,11 @@ class train_by_regression():
         self.R = R # R = 1/sigma^2
         self.X = None
         self.Y = None
+        self.fixed_C = fixed_C
+        self.weight_C = weight_C # use only when fixed_C is True
 
         self._pre_processing()
-
+    
     def _pre_processing(self):
         first_usable_t_idx = self.time_delay*(self.time_delay_dim-1) # the first point that can be used for training.
         tmp_v = jnp.array([jnp.roll(self.voltage_list, -i*self.time_delay) for i in range(self.time_delay_dim)]).T
@@ -49,27 +51,40 @@ class train_by_regression():
         tmp_i = (self.current_list + jnp.roll(self.current_list, -1))/2
         tmp_i = tmp_i[first_usable_t_idx:-1]
 
-        self.X = jax.vmap(self._get_basis, in_axes=(0, 0))(tmp_v, tmp_delta_v/self.time_spacing)
-        self.Y = tmp_i
+        if self.fixed_C is False:
+            self.X = jax.vmap(self._get_basis, in_axes=(0, 0))(tmp_v, tmp_i)
+            self.Y = tmp_delta_v/self.time_spacing
+        else: 
+            self.X = jax.vmap(self._get_basis, in_axes=(0, None))(tmp_v, None)
+            self.Y = tmp_delta_v/self.time_spacing - tmp_i/self.weight_C
 
-    def _get_basis(self, time_delay_Vs, dVdt):
+    def _get_basis(self, time_delay_Vs, I_avg):
         diff = self.centers - time_delay_Vs
         rbfs = jnp.exp(-np.sum(diff**2, axis=-1)*self.R/2)
         leaky_terms = jnp.array([1, time_delay_Vs[-1]])
-        return jnp.concatenate((-rbfs, -leaky_terms, jnp.array([dVdt])))
-
+        if self.fixed_C is False:
+            return jnp.concatenate((rbfs, leaky_terms, jnp.array([I_avg])))
+        else:
+            return jnp.concatenate((rbfs, leaky_terms))
 
     def get_weights(self, solver="auto"):
+        "return a tuple (weights_rbf, weights_leak, weight_C_inverse)"
         ridge = sklearn.linear_model.Ridge(alpha=self.beta, fit_intercept=False, solver=solver)
         self.ridge = ridge.fit(self.X, self.Y)
         self.score = ridge.score(self.X, self.Y)
-        weight_C = ridge.coef_[-1]
-        weights_leak = ridge.coef_[-3:-1]
-        weights_rbf = ridge.coef_[:-3]
-        return (weights_rbf, weights_leak, weight_C)
+        if self.fixed_C is False:
+            weight_C_inverse = ridge.coef_[-1]
+            weights_leak = ridge.coef_[-3:-1]
+            weights_rbf = ridge.coef_[:-3]
+        else: 
+            weight_C_inverse = 1/self.weight_C
+            weights_leak = ridge.coef_[-2:]
+            weights_rbf = ridge.coef_[:-2]
+        return (weights_rbf, weights_leak, weight_C_inverse) 
+
     
     def get_error_list(self):
-        return self.Y - self.X @ self.ridge.coef_
+        return self.Y - self.X @ self.ridge.coef_    
 
 class train_by_BP():
     def __init__(self, 

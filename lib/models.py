@@ -41,7 +41,7 @@ class prediction_model(nn.Module):
     weights_rbf: Sequence[float]
     ann: nn.Module = None
     weights_leak: Sequence[float] = jnp.zeros(2)
-    weight_C: float = 1.
+    weight_C_inverse: float = 1.
     weights_poly: Union[Sequence[float], None] = None
     
     def setup(self) -> None:
@@ -67,7 +67,7 @@ class prediction_model(nn.Module):
         leak_term = self._leaky_fun(Vt)
         poly_term = self._poly_fun(time_delay_Vs)
 
-        return Vt + self.time_spacing*self.C_inverse_correction_factor*(rbf_term + leak_term + poly_term + It/self.weight_C) + ann_term
+        return Vt + self.time_spacing*self.C_inverse_correction_factor*(rbf_term + leak_term + poly_term + It*self.weight_C_inverse) + ann_term
     
     def _rbfs(self, time_delay_Vs):
         "`time_delay_V` is expected to be 1d array"
